@@ -1,0 +1,30 @@
+---
+- name: Copy files to target directory
+  ansible.builtin.copy:
+    src: /etc/netplan/
+    dest: /opt/
+    remote_src: true
+    mode: "0600"
+
+- name: Clean dir
+  ansible.builtin.file:
+    path: /etc/netplan/*
+    state: absent
+
+- name: Copy netplan file 00-installer-config.yaml to /etc/netplan/
+  ansible.builtin.template:
+    src: templates/00-installer-config.yaml.j2
+    dest: /etc/netplan/00-installer-config.yaml
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+
+- name: Apply netplan configuration
+  ansible.builtin.command: timeout 10s netplan apply
+  register: netplan_result
+  failed_when:
+    - netplan_result.rc != 0  # Falla si el código de retorno no es 0 (éxito)
+    - "'timed out' in netplan_result.stderr"  # O falla si el error incluye "timed out"
+  changed_when:
+    - netplan_result.rc == 0 and "'No changes made' not in netplan_result.stdout"

@@ -1,0 +1,48 @@
+network:
+  version: 2
+  bonds:
+    # mgmt
+    bond0:
+      interfaces:
+      - ens1f0
+      - enp152s0f0
+      parameters:
+        lacp-rate: fast
+        mode: 802.3ad
+        transmit-hash-policy: layer3+4
+    # storage
+    bond1:
+      interfaces:
+      - ens1f1
+      - enp152s0f1
+      parameters:
+        lacp-rate: fast
+        mode: 802.3ad
+        transmit-hash-policy: layer3+4
+  bridges:
+    cloudbr0:
+      interfaces: [bond0]
+      addresses: [{{ cloudbr0_ip }}]
+      dhcp4: false
+      dhcp6: false
+      routes:
+        - to: default
+          via: {{ cloudbr0_gw }}
+      nameservers:
+        addresses: [{{ dns_servers }}]
+      parameters:
+        stp: false
+        forward-delay: 0
+    cloudbr1:
+      interfaces: [bond1]
+      addresses: [{{ cloudbr1_ip }}]
+      dhcp4: false
+      dhcp6: false
+      parameters:
+        stp: false
+        forward-delay: 0
+  ethernets:
+    enp152s0f0: {}
+    enp152s0f1: {}
+    ens1f0: {}
+    ens1f1: {}

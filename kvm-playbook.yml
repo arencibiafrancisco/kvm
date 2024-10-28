@@ -1,0 +1,14 @@
+---
+- name: Prepare KVM nodes
+  hosts: hypervisors
+  become: true
+  vars:
+    cloudbr0_ip: "{{ cloudbr0_ip }}"
+    cloudbr0_gw: "{{ cloudbr0_gw }}"
+    dns_servers: "{{ dns_servers }}"
+    cloudbr1_ip: "{{ cloudbr1_ip }}"
+
+  roles:
+    - { role: kvm_installer_role, tags: ['kvm'] }
+    - { role: cockpit_installer_role, tags: ['cockpit'] }
+    - { role: netplan_configuration_role, tags: ['network'] }
