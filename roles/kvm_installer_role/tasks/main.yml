@@ -1,151 +1,148 @@
 ---
-- name: Update repo list
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 3600
+  - name: Update repo list
+    ansible.builtin.apt:
+      update_cache: true
+      cache_valid_time: 3600
 
-- name: Add CloudStack repository
-  ansible.builtin.lineinfile:
-    path: /etc/apt/sources.list.d/cloudstack.list
-    line: "deb https://download.cloudstack.org/ubuntu {{ ansible_distribution_release | lower }} {{ kvm_installer_role_cloudstack_release }}"
-    create: true
-    mode: '0644'
+  - name: Add CloudStack repository
+    ansible.builtin.lineinfile:
+      path: /etc/apt/sources.list.d/cloudstack.list
+      line: "deb https://download.cloudstack.org/ubuntu {{ ansible_distribution_release | lower }} {{ kvm_installer_role_cloudstack_release | default('latest') }}"
+      create: true
+      mode: '0644'
 
-- name: Download CloudStack GPG key
-  ansible.builtin.get_url:
-    url: https://download.cloudstack.org/release.asc
-    dest: "/tmp/cloudstack-release.asc"
-    mode: '0644'
+  - name: Import CloudStack GPG key
+    ansible.builtin.apt_key:
+      url: https://download.cloudstack.org/release.asc
+      state: present
 
-- name: Import CloudStack GPG key
-  ansible.builtin.command:
-    cmd: gpg --dearmor -o /etc/apt/trusted.gpg.d/cloudstack.gpg /tmp/cloudstack-release.asc
-  args:
-    creates: /etc/apt/trusted.gpg.d/cloudstack.gpg
+  - name: Update apt cache to include new repositories
+    ansible.builtin.apt:
+      update_cache: true
+      force_apt_get: true
 
-- name: Update apt cache again to include new repositories
-  ansible.builtin.apt:
-    update_cache: true
+  - name: Upgrade all packages
+    ansible.builtin.apt:
+      upgrade: dist
+      update_cache: true
 
-- name: Update all packages
-  ansible.builtin.apt:
-    upgrade: dist
-    update_cache: true
+  - name: Install KVM and CloudStack Agent
+    ansible.builtin.apt:
+      name:
+        - qemu-kvm
+        - cloudstack-agent
+      state: present
 
-- name: Install KVM and Cloudstack Agent
-  ansible.builtin.apt:
-    name:
-      - qemu-kvm
-      - cloudstack-agent
-    state: present
+  - name: Ensure vnc_listen is configured to listen on all interfaces
+    ansible.builtin.lineinfile:
+      path: /etc/libvirt/qemu.conf
+      regexp: '^#?vnc_listen\s*='
+      line: 'vnc_listen = "0.0.0.0"'
+      create: true
+      backup: true
 
-- name: Ensure vnc_listen is configured to listen on all interfaces
-  ansible.builtin.replace:
-    path: /etc/libvirt/qemu.conf
-    regexp: '^#?vnc_listen\s*=.*$'
-    replace: 'vnc_listen = "0.0.0.0"'
-    backup: true
+  - name: Ensure LIBVIRTD_ARGS is set to "--listen"
+    ansible.builtin.lineinfile:
+      path: /etc/default/libvirtd
+      regexp: '^LIBVIRTD_ARGS='
+      line: 'LIBVIRTD_ARGS="--listen"'
+      create: true
+      backup: true
+      state: present
 
-- name: Ensure LIBVIRTD_ARGS is set to "--listen" in /etc/default/libvirtd, affecting only the active configuration
-  ansible.builtin.replace:
-    path: /etc/default/libvirtd
-    regexp: '^(LIBVIRTD_ARGS=).*$'
-    replace: 'LIBVIRTD_ARGS="--listen"'
-    backup: true
+  - name: Configure libvirtd settings for network listening
+    ansible.builtin.lineinfile:
+      path: /etc/libvirt/libvirtd.conf
+      regexp: '^{{ item.regexp | default(item.line) }}'
+      line: "{{ item.line }}"
+      backup: true
+      create: true
+      mode: '0644'
+    loop:
+      - { line: 'listen_tls=0', regexp: '^(#)?listen_tls=' }
+      - { line: 'listen_tcp=1', regexp: '^(#)?listen_tcp=' }
+      - { line: 'tcp_port = "16509"', regexp: '^(#)?tcp_port\s*=' }
+      - { line: 'mdns_adv = 0', regexp: '^(#)?mdns_adv\s*=' }
+      - { line: 'auth_tcp = "none"', regexp: '^(#)?auth_tcp\s*=' }
+      - { line: "listen_addr = \"{{ ansible_facts['default_ipv4']['address'] }}\"", regexp: '^(#)?listen_addr\s*=' }
 
-- name: Configure libvirtd settings for network listening
-  ansible.builtin.lineinfile:
-    path: /etc/libvirt/libvirtd.conf
-    regexp: '^{{ item.regexp | default(item.line) }}'
-    line: "{{ item.line }}"
-    backup: true
-    create: true
-    mode: '0644'
-  loop:
-    - { line: 'listen_tls=0', regexp: '^(#)?listen_tls=' }
-    - { line: 'listen_tcp=1', regexp: '^(#)?listen_tcp=' }
-    - { line: 'tcp_port = "16509"', regexp: '^(#)?tcp_port\s*=' }
-    - { line: 'mdns_adv = 0', regexp: '^(#)?mdns_adv\s*=' }
-    - { line: 'auth_tcp = "none"', regexp: '^(#)?auth_tcp\s*=' }
-    - { line: "listen_addr = \"{{ ansible_facts['default_ipv4']['address'] }}\"", regexp: '^(#)?listen_addr\s*=' }
+  - name: Mask libvirtd sockets
+    ansible.builtin.systemd:
+      name: "{{ item }}"
+      masked: true
+    loop:
+      - libvirtd.socket
+      - libvirtd-ro.socket
+      - libvirtd-admin.socket
+      - libvirtd-tls.socket
+      - libvirtd-tcp.socket
 
-- name: Mask libvirtd sockets
-  ansible.builtin.systemd:
-    name: "{{ item }}"
-    masked: true
-  loop:
-    - libvirtd.socket
-    - libvirtd-ro.socket
-    - libvirtd-admin.socket
-    - libvirtd-tls.socket
-    - libvirtd-tcp.socket
+  - name: Ensure libvirtd is enabled, started, and restarted to apply changes
+    ansible.builtin.systemd:
+      name: libvirtd
+      state: restarted
+      enabled: true
 
-- name: Ensure libvirtd is enabled, started, and restarted to apply changes
-  ansible.builtin.systemd:
-    name: libvirtd
-    state: restarted
-    enabled: true
+  - name: Install NFS support
+    ansible.builtin.apt:
+      name:
+        - nfs-common
+      state: present
 
-- name: Install nfs support
-  ansible.builtin.apt:
-    name:
-      - nfs-common
-    state: present
+  - name: Add parameters to GRUB file
+    ansible.builtin.lineinfile:
+      path: /etc/default/grub
+      regexp: '^GRUB_CMDLINE_LINUX='
+      line: 'GRUB_CMDLINE_LINUX="intel_iommu=on"'
+      backup: true
+    register: grub_config_updated
+    notify:
+      - update-grub
+      - reboot-system
 
-- name: Add parameters to GRUB file
-  ansible.builtin.lineinfile:
-    path: /etc/default/grub
-    regexp: '^GRUB_CMDLINE_LINUX='
-    line: 'GRUB_CMDLINE_LINUX="intel_iommu=on"'
-    backup: true
-  register: grub_config_updated
-  notify:
-    - update-grub     # Notify handler to update GRUB
-    - reboot-system   # Notify handler to reboot the system is required
+  - name: Configure log rotation for CloudStack agent logs
+    ansible.builtin.copy:
+      dest: /etc/logrotate.d/cloudstack-agent
+      content: |
+        /var/log/cloudstack/agent/*.log {
+          daily
+          rotate 30
+          dateext
+          compress
+          missingok
+          notifempty
+          create 0644 root root
+          sharedscripts
+        }
+      mode: '0644'
 
-- name: Configure log rotation for CloudStack agent logs
-  ansible.builtin.copy:
-    dest: /etc/logrotate.d/cloudstack-agent
-    content: |
-      /var/log/cloudstack/agent/*.log {
-        daily
-        rotate 30
-        dateext
-        compress
-        missingok
-        notifempty
-        create 0644 root root
-        sharedscripts
-      }
-    mode: '0644'
-
-- name: Replace existing rsyslog log rotation configuration
-  ansible.builtin.copy:
-    dest: /etc/logrotate.d/rsyslog
-    content: |
-      /var/log/syslog
-      /var/log/mail.info
-      /var/log/mail.warn
-      /var/log/mail.err
-      /var/log/mail.log
-      /var/log/daemon.log
-      /var/log/kern.log
-      /var/log/auth.log
-      /var/log/user.log
-      /var/log/lpr.log
-      /var/log/cron.log
-      /var/log/debug
-      /var/log/messages
-      {
-        daily
-        rotate 30
-        dateext
-        missingok
-        notifempty
-        compress
-        sharedscripts
-        postrotate
-          /usr/lib/rsyslog/rsyslog-rotate
-        endscript
-      }
-    mode: '0644'
+  - name: Replace existing rsyslog log rotation configuration
+    ansible.builtin.copy:
+      dest: /etc/logrotate.d/rsyslog
+      content: |
+        /var/log/syslog
+        /var/log/mail.info
+        /var/log/mail.warn
+        /var/log/mail.err
+        /var/log/mail.log
+        /var/log/daemon.log
+        /var/log/kern.log
+        /var/log/auth.log
+        /var/log/user.log
+        /var/log/lpr.log
+        /var/log/cron.log
+        /var/log/debug
+        /var/log/messages
+        {
+          daily
+          rotate 30
+          dateext
+          missingok
+          notifempty
+          compress
+          sharedscripts
+          postrotate
+            /usr/lib/rsyslog/rsyslog-rotate
+          endscript
+        }
+      mode: '0644'
