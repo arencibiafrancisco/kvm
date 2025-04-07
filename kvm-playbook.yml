@@ -11,4 +11,4 @@
   roles:
     - { role: kvm_installer_role, tags: ['kvm'] }
     - { role: cockpit_installer_role, tags: ['cockpit'] }
-    - { role: netplan_configuration_role, tags: ['network'] }
+    #- { role: netplan_configuration_role, tags: ['network'] }
